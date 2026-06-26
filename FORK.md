@@ -54,3 +54,13 @@ On an upstream `midea-local` update you want to pick up:
 4. Bump version in `manifest.json`, create a new release tag, HACS will offer the update.
 
 Ideally, the `status_cool` gap is worth a PR upstream (the lib parses it but never exposes it), which would remove the need to patch the vendored copy.
+
+## Upstream tracking
+
+Base: integration `wuwentao/midea_ac_lan` **v0.6.12** + library `midea-local` (`midea-lan/midea-local`, formerly rokam) **6.8.0**.
+
+Checked **2026-06-26**:
+- Integration v0.6.12 is the latest release; no C3 wrapper commits after it.
+- Library v6.9.0 (2026-06-25) released, but **no C3 changes**: features are `ac` (B5 per-mode min/max temps) and `e2` (water heater memo / heating-power multiplier); one general bug fix (`asyncio.Lock` instead of `threading.Lock`, #482, connection robustness for all devices). The C3 ECO `IndexError` is NOT fixed and `status_cool` was NOT added upstream, so this fork stays necessary.
+
+Re-vendor only when a release ships a real C3 fix (e.g. the ECO parse error, or upstream finally exposing `status_cool`). v6.9.0 alone is not worth a re-vendor.
