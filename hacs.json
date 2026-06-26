@@ -1,6 +1,4 @@
 {
-  "name": "Midea AC LAN",
-  "homeassistant": "2023.8",
-  "zip_release": true,
-  "filename": "midea_ac_lan.zip"
+  "name": "Midea AC LAN (sfortis heat-pump fork)",
+  "homeassistant": "2023.8"
 }
