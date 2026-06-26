@@ -10,7 +10,14 @@ integration load process:
 """
 
 import logging
+import os
+import sys
 from typing import Any, cast
+
+# Use the vendored midealocal package bundled with this fork (targeted C3 heat-pump
+# build) instead of the pip `midea-local` requirement. Must run before any
+# `from midealocal...` import below so the local copy wins.
+sys.path.insert(0, os.path.dirname(__file__))
 
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr

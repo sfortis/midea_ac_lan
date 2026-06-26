@@ -242,6 +242,9 @@
       },
       "electronic_smell": {
         "name": "Deodorizing sterilizing"
+      },
+      "status_cool": {
+        "name": "Cooling status"
       }
     },
     "climate": {
@@ -655,6 +658,9 @@
       },
       "variable_mode": {
         "name": "Variable Mode"
+      },
+      "room_target_temp": {
+        "name": "Room Target Temperature"
       }
     },
     "switch": {
