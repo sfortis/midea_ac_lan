@@ -256,7 +256,11 @@ class C3BasicBody(MessageBody):
         self.time_set = body[data_offset + 2] & 0x01 > 0
         self.silent_mode = body[data_offset + 2] & 0x02 > 0
         self.holiday_on = body[data_offset + 2] & 0x04 > 0
-        self.eco_mode = body[data_offset + 2] & 0x08 > 0
+        # [fork] eco_mode is driven by the X07 ECO frame (eco_function_state),
+        # not this X01 bit. On protocol-3 C3 heat pumps the X01 bit does not
+        # track the ECO toggle and would reset the ECO switch back to off
+        # between X07 polls. See FORK.md / C3ECOBody.
+        # self.eco_mode = body[data_offset + 2] & 0x08 > 0
         self.zone_terminal_type = body[data_offset + 2]
         # BodyBytes 4
         self.mode = body[data_offset + 3]
@@ -370,8 +374,18 @@ class C3ECOBody(MessageBody):
     def __init__(self, body: bytearray, data_offset: int = 0) -> None:
         """Initialize C3 ECO message body."""
         super().__init__(body)
-        self.eco_function_state = body[data_offset] & 0x01 > 0
-        self.eco_timer_state = body[data_offset] & 0x02 > 0
+        # [fork] Guard against an empty/short X07 payload. Some C3 heat pumps
+        # answer the ECO query (or echo a set) with a truncated body; reading
+        # body[data_offset] then raised the known C3 ECO IndexError. When the
+        # body is too short we leave the attributes unset so the generic
+        # process_message copy skips them and keeps the last known state.
+        if len(body) > data_offset:
+            self.eco_function_state = body[data_offset] & 0x01 > 0
+            self.eco_timer_state = body[data_offset] & 0x02 > 0
+            # [fork] Bind the ECO switch (DeviceAttributes.eco_mode) to the real
+            # ECO function state reported in the X07 frame. This frame is also
+            # the echo of a MessageSetECO, so a toggle reflects back at once.
+            self.eco_mode = self.eco_function_state
 
 
 class C3DisinfectBody(MessageBody):

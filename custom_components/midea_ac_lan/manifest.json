@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/sfortis/midea_ac_lan/issues",
   "loggers": ["midealocal"],
   "requirements": [],
-  "version": "0.6.12-hp1"
+  "version": "0.6.12-hp2"
 }
