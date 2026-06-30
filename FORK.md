@@ -23,10 +23,10 @@ The hard requirement is that the integration must run **without** the pip `midea
    - `midealocal/devices/c3/__init__.py`: add `DeviceAttributes.status_cool: None` to the `attributes` init dict.
    - That is all: `process_message` is generic (iterates `_attributes` and copies any matching message field via `hasattr`), and `C3EnergyBody` already parses `status_cool` (`status_byte & 0x02`).
 
-3. **ECO switch fix** in the vendored `midealocal/devices/c3/message.py`:
-   - Symptom: the ECO switch (`switch.<device_id>_eco_mode`) snapped straight back to off, looking like HA rejected ECO.
-   - Root cause: the switch sends a `MessageSetECO` (**X07** frame) but the `eco_mode` attribute was read back from the **X01** basic frame bit (`body[+2] & 0x08`), which does not track the ECO toggle on this protocol-3 pump. The dedicated X07 ECO frame (parsed by `C3ECOBody`) carried the real `eco_function_state` but was never bound to the switch.
-   - Fix (2 spots): in `C3ECOBody` set `self.eco_mode = self.eco_function_state` (so X07 drives the switch and the set echoes back immediately), wrapped in a `len(body) > data_offset` guard that also kills the known C3 ECO `IndexError` on a truncated payload; in `C3BasicBody` comment out the `self.eco_mode = body[+2] & 0x08` line so X01 no longer resets it between X07 polls.
+3. **ECO switch behaviour** - two small, independent changes:
+   - Context: the ECO switch (`switch.<device_id>_eco_mode`) appeared to "reject" turning on. This is **correct hardware behaviour**: the C3 only accepts ECO while heating; in cooling it silently refuses and the switch snaps back to off (verified against the official Midea app). `eco_mode` is read from the **X01** basic frame (`C3BasicBody`, `body[+2] & 0x08`) and that read is fine - left unchanged.
+   - Vendored `midealocal/devices/c3/message.py`: in `C3ECOBody` the `eco_function_state` / `eco_timer_state` parse is wrapped in a `len(body) > data_offset` guard, killing the known C3 ECO `IndexError` when the pump answers the X07 ECO query (or echoes a set) with a truncated body.
+   - Wrapper `switch.py` (not vendored): a `MideaC3EcoSwitch(MideaSwitch)` subclass is used for the C3 `eco_mode` switch. Its `turn_on` raises `HomeAssistantError` ("ECO mode can only be enabled while the heat pump is in heating mode") when `C3Attributes.mode != C3DeviceMode.HEAT`, so a cool-mode toggle gives a clear notification instead of a silent revert.
 
 4. **Entity definitions** in `midea_devices.py` (C3 block, `0xC3`):
    - `C3Attributes.status_cool` -> `Platform.BINARY_SENSOR` (running, mdi:snowflake)
@@ -49,14 +49,15 @@ Domain stays `midea_ac_lan`, so an existing config entry, entity ids, unique ids
 - **Water inlet/outlet temps, compressor frequency, voltage, EXV current** (`temp_tw_in`/`temp_tw_out`, X10 `C3UnitParaBody`): the pump **times out** on the X10 query (and X09 Disinfect), so the integration marks them unsupported and skips. These attributes stay `None`. A Modbus adapter on the pump is the only way to get them.
 - **Active X04 polling** (to refresh status/energy faster than the sparse push): tested by adding a `MessageQueryEnergy` (X04) to `build_query`. The pump **answers** the X04 query (no timeout) but returns an **empty** payload (`aa12c3...0000000000000024`), which only causes a parse error. Real status/energy come **only** via notify push. Reverted; do not re-add.
 - **DHW, backup heaters (TBH/IBH), tank temp**: not physically present on this install. The related flags (`status_dhw`, `status_tbh`, `status_ibh`, `tank_actual_temperature`, `fast_dhw`) are fake/unused. Ignore them.
+- **ECO mode in cooling**: the pump only accepts ECO while heating (confirmed in the official app). A cool-mode ECO request is refused by the hardware; the integration now blocks it up front with a clear error (see change 3). This is not a bug.
 
 ## Maintainability
 
 On an upstream `midea-local` update you want to pick up:
 1. Re-vendor `midealocal/` (copy from the new pip version / upstream).
 2. Re-apply the 2-line `status_cool` patch (const.py + c3 `__init__.py`).
-3. Re-apply the ECO switch fix in c3 `message.py` (`C3ECOBody` eco_mode bind + guard, and the commented-out `C3BasicBody` X01 eco_mode line) - unless upstream has fixed the ECO read path by then.
-4. Keep the `midea_devices.py` entity entries + `__init__.py` sys.path + `manifest.json` requirements changes (these live in wrapper files, not the vendored lib).
+3. Re-apply the `C3ECOBody` `len(body) > data_offset` guard in c3 `message.py` (the ECO `IndexError` fix) - unless upstream has fixed it by then.
+4. Keep the `midea_devices.py` entity entries + `MideaC3EcoSwitch` heat-only guard in `switch.py` + `__init__.py` sys.path + `manifest.json` requirements changes (these live in wrapper files, not the vendored lib).
 5. Bump version in `manifest.json`, create a new release tag, HACS will offer the update.
 
 Ideally, the `status_cool` gap is worth a PR upstream (the lib parses it but never exposes it), which would remove the need to patch the vendored copy.
