@@ -34,7 +34,16 @@ class MideaEntity(Entity):
         )[entity_key]
         self._entity_key = entity_key
         self._unique_id = f"{DOMAIN}.{self._device.device_id}_{entity_key}"
-        self.entity_id = self._unique_id
+        # [fork] entity_id must use the platform domain (switch/sensor/select/
+        # binary_sensor/climate/...), not the integration DOMAIN. Setting a
+        # wrong-domain entity_id triggers HA's "sets an entity ID with wrong
+        # domain" warning and, from HA 2027.5.0, the entity is rejected outright
+        # (HomeAssistantError in entity_platform._async_add_entity). The object
+        # id part is unchanged, so already-registered ids (switch.<id>_<key>,
+        # etc.) stay identical - only the domain prefix is corrected.
+        self.entity_id = (
+            f"{self._config['type']}.{self._device.device_id}_{entity_key}"
+        )
         self._device_name = self._device.name
 
         # HA language setting:

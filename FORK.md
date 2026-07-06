@@ -9,7 +9,7 @@ Personal fork of [wuwentao/midea_ac_lan](https://github.com/wuwentao/midea_ac_la
 | `sensor.<device_id>_room_target_temp` | sensor (temperature, C) | The pump's room setpoint. Already a climate attribute upstream, here promoted to its own sensor. Readable, not settable. Comes from the **X01** frame, polled every `refresh_interval` (30s). |
 | `binary_sensor.<device_id>_status_cool` | binary_sensor (running) | Cooling-active flag. Parsed by `C3EnergyBody` upstream but never stored in `DeviceAttributes`. Comes from the **X04** notify push (sparse, state-change driven), same path as `status_heating`. |
 
-## How it is built (the 5 changes)
+## How it is built (the 6 changes)
 
 The hard requirement is that the integration must run **without** the pip `midea-local` dependency, so the library is vendored.
 
@@ -33,7 +33,12 @@ The hard requirement is that the integration must run **without** the pip `midea
    - `C3Attributes.room_target_temp` -> `Platform.SENSOR` (temperature, C, mdi:home-thermometer)
    - Plus `translation_key` entries in `translations/en.json`.
 
-5. **hacs.json**: removed `zip_release`/`filename` so HACS downloads the source directly (no zip asset to maintain).
+5. **entity_id wrong-domain fix** in the wrapper `midea_entity.py` (not vendored):
+   - Upstream sets `self.entity_id = self._unique_id`, i.e. `midea_ac_lan.<device_id>_<key>` - the integration DOMAIN as the entity_id domain instead of the platform domain. HA logs "sets an entity ID with wrong domain" (66x on start here) and, from **HA 2027.5.0**, rejects such entities outright (`HomeAssistantError` in `entity_platform._async_add_entity`), so they would stop loading.
+   - Fix: build entity_id from the platform, `f"{self._config['type']}.{device_id}_{key}"` (all 446 entity defs carry a `Platform.*` `type`). The object-id part is unchanged, so already-registered ids (`switch.<id>_<key>`, `select.<id>_<key>`, ...) stay identical - only the domain prefix is corrected. `unique_id` is left as-is (a dotted unique_id is harmless).
+   - Present upstream too (checked latest `main`), not C3-specific; worth a PR upstream.
+
+6. **hacs.json**: removed `zip_release`/`filename` so HACS downloads the source directly (no zip asset to maintain).
 
 ## Installation (HACS custom repository)
 
@@ -57,7 +62,7 @@ On an upstream `midea-local` update you want to pick up:
 1. Re-vendor `midealocal/` (copy from the new pip version / upstream).
 2. Re-apply the 2-line `status_cool` patch (const.py + c3 `__init__.py`).
 3. Re-apply the `C3ECOBody` `len(body) > data_offset` guard in c3 `message.py` (the ECO `IndexError` fix) - unless upstream has fixed it by then.
-4. Keep the `midea_devices.py` entity entries + `MideaC3EcoSwitch` heat-only guard in `switch.py` + `__init__.py` sys.path + `manifest.json` requirements changes (these live in wrapper files, not the vendored lib).
+4. Keep the wrapper-file changes (not vendored): `midea_devices.py` entity entries, `MideaC3EcoSwitch` heat-only guard in `switch.py`, the platform-domain `entity_id` fix in `midea_entity.py`, `__init__.py` sys.path, and `manifest.json` requirements.
 5. Bump version in `manifest.json`, create a new release tag, HACS will offer the update.
 
 Ideally, the `status_cool` gap is worth a PR upstream (the lib parses it but never exposes it), which would remove the need to patch the vendored copy.
