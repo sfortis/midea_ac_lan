@@ -553,7 +553,10 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                 CONF_PORT: device.get(CONF_PORT),
                 CONF_MODEL: device.get(CONF_MODEL),
             }
-            storage_device = self._load_device_config(device_id)
+            storage_device = await self.hass.async_add_executor_job(
+                self._load_device_config,
+                device_id,
+            )
             # device config already exist, load from local json without cloud
             if self._check_storage_device(device, storage_device):
                 self.found_device = {
@@ -790,7 +793,10 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                     CONF_KEY: user_input[CONF_KEY],
                 }
                 # save device json config when adding new device
-                self._save_device_config(data)
+                await self.hass.async_add_executor_job(
+                    self._save_device_config,
+                    data,
+                )
                 # finish add device entry
                 return self.async_create_entry(
                     title=f"{user_input[CONF_NAME]}",

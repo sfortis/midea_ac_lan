@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/sfortis/midea_ac_lan/issues",
   "loggers": ["midealocal"],
   "requirements": ["pycryptodome>=3.20.0", "ifaddr>=0.2.0", "Deprecated>=1.2.14"],
-  "version": "0.6.12-hp5"
+  "version": "0.6.12-hp6"
 }

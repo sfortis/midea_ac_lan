@@ -64,12 +64,7 @@ async def update_listener(hass: HomeAssistant, config_entry: ConfigEntry) -> Non
     `config_entry.async_on_unload(config_entry.add_update_listener(update_listener))`
     means the Listener is attached when the entry is loaded and detached at unload
     """
-    # Forward the unloading of an entry to platforms.
-    await hass.config_entries.async_unload_platforms(config_entry, ALL_PLATFORM)
-    # forward the Config Entry to the platforms
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(config_entry, ALL_PLATFORM),
-    )
+    # Apply device-level option changes (these are independent of the platforms).
     device_id: int = cast("int", config_entry.data.get(CONF_DEVICE_ID))
     customize = config_entry.options.get(CONF_CUSTOMIZE, "")
     ip_address = config_entry.options.get(CONF_IP_ADDRESS, None)
@@ -81,6 +76,21 @@ async def update_listener(hass: HomeAssistant, config_entry: ConfigEntry) -> Non
             dev.set_ip_address(ip_address)
         if refresh_interval is not None:
             dev.set_refresh_interval(refresh_interval)
+    # Reload the platforms so entity-selection option changes take effect. Honour
+    # the unload result and await the re-setup: firing setup as a background task
+    # (or ignoring a failed unload) can leave a second set of entities and update
+    # callbacks running on top of the old ones.
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        config_entry,
+        ALL_PLATFORM,
+    )
+    if unload_ok:
+        await hass.config_entries.async_forward_entry_setups(config_entry, ALL_PLATFORM)
+    else:
+        _LOGGER.warning(
+            "Midea options reload: unload failed for %s, entities not reloaded",
+            device_id,
+        )
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:  # noqa: ARG001
