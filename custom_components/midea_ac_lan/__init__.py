@@ -276,6 +276,16 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     device_type = config_entry.data.get(CONF_TYPE)
     if device_type == CONF_ACCOUNT:
         return True
+    # Unload the platforms first and honour the result. If a platform refuses
+    # to unload we must NOT report success, nor tear down the device, otherwise
+    # entities would be left active pointing at a closed/removed device while
+    # the config entry is considered unloaded.
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        config_entry,
+        ALL_PLATFORM,
+    )
+    if not unload_ok:
+        return False
     device_id = config_entry.data.get(CONF_DEVICE_ID)
     if device_id is not None:
         dm = hass.data[DOMAIN][DEVICES].get(device_id)
@@ -284,10 +294,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
                 dm.close()
             except (OSError, ConnectionError, AttributeError) as e:
                 _LOGGER.warning("Failed to close Midea socket cleanly: %s", e)
-        hass.data[DOMAIN][DEVICES].pop(device_id)
-    # Forward the unloading of an entry to platforms
-    await hass.config_entries.async_unload_platforms(config_entry, ALL_PLATFORM)
-    return True
+        hass.data[DOMAIN][DEVICES].pop(device_id, None)
+    return unload_ok
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

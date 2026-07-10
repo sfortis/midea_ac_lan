@@ -91,6 +91,16 @@ class MideaEntity(Entity):
                 else f"{self._device_name}"
             )
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister the device update callback when the entity is removed.
+
+        The callback is registered in __init__, but the device object outlives
+        an options reload (only the platforms/entities are recreated). Without
+        this, every Configure/Save leaks a callback and a stale entity
+        reference on the device, causing duplicate state updates over time.
+        """
+        self._device.unregister_update(self.update_state)
+
     @property
     def device(self) -> MideaDevice:
         """Return device structure."""

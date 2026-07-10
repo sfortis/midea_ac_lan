@@ -40,6 +40,21 @@ The hard requirement is that the integration must run **without** the pip `midea
 
 6. **hacs.json**: removed `zip_release`/`filename` so HACS downloads the source directly (no zip asset to maintain).
 
+## Correctness fixes (hp5)
+
+A code review surfaced several issues; the fixes below shipped in `v0.6.12-hp5`.
+
+- **Declared external requirements** (`manifest.json`): the vendored library imports `Crypto` (pycryptodome), `ifaddr` (discovery) and `Deprecated`, none guaranteed by HA core. With `requirements: []` a clean install (or a venv rebuild after a core update) would fail with `ModuleNotFoundError: No module named 'Crypto'`. Now declares `pycryptodome`, `ifaddr`, `Deprecated`. (aiohttp/aiofiles/defusedxml/typing_extensions are HA-core-provided.)
+- **Entity update-callback leak** (wrapper `midea_entity.py`): entities register their update callback in `__init__`, but the device object outlives an options reload. Added `async_will_remove_from_hass` -> `unregister_update` so Configure/Save no longer accumulates callbacks and stale entity references.
+- **Unload result honoured** (wrapper `__init__.py`): `async_unload_entry` now unloads platforms first, returns the real result, and only closes/removes the device on success (previously it closed the device first and always returned `True`).
+- **C3 zone1 temp-mode index** (vendored `c3/__init__.py`): the `zone1/zone2` water/room temp-mode block runs after the `for zone in [0, 1]` loop, so `zone` was stuck at 1 and zone1 was evaluated with zone2's `zone_temp_type`. Now uses explicit `[0]`/`[1]`.
+- **C3 double V3 authentication + blocking config-flow I/O** (wrapper `config_flow.py`): `connect()` already performs the V3 handshake, so the extra `authenticate()` (which could reject a valid token on the same session) was removed; `connect()` and `discover()` now run via `async_add_executor_job` instead of blocking the event loop.
+- **C3 energy/UnitPara bit shift** (vendored `c3/message.py`): 4-byte counters combined the high byte with `<< 32` instead of `<< 24` (6 sites), inflating values. Fixed.
+
+### Known limitation (not fixed)
+
+- **Vendored package is not namespaced**: `__init__.py` puts the integration dir on `sys.path` and imports `midealocal` at top level. If another integration in the same HA process loads a different `midealocal` first, imports could resolve to the wrong copy (and this fork would impose its vendored 6.8.0 on that other consumer). Harmless while this is the only `midealocal` consumer; a real fix means renaming the vendored package and rewriting every internal import, deferred as a large, higher-risk change.
+
 ## Installation (HACS custom repository)
 
 1. HACS -> three-dot menu -> Custom repositories -> add `https://github.com/sfortis/midea_ac_lan`, category Integration.
@@ -61,8 +76,8 @@ Domain stays `midea_ac_lan`, so an existing config entry, entity ids, unique ids
 On an upstream `midea-local` update you want to pick up:
 1. Re-vendor `midealocal/` (copy from the new pip version / upstream).
 2. Re-apply the 2-line `status_cool` patch (const.py + c3 `__init__.py`).
-3. Re-apply the `C3ECOBody` `len(body) > data_offset` guard in c3 `message.py` (the ECO `IndexError` fix) - unless upstream has fixed it by then.
-4. Keep the wrapper-file changes (not vendored): `midea_devices.py` entity entries, `MideaC3EcoSwitch` heat-only guard in `switch.py`, the platform-domain `entity_id` fix in `midea_entity.py`, `__init__.py` sys.path, and `manifest.json` requirements.
+3. Re-apply the vendored c3 fixes unless upstream has fixed them by then: the `C3ECOBody` `len(body) > data_offset` guard (ECO `IndexError`), the zone1 `zone_temp_type[0]`/`[1]` index fix in c3 `__init__.py`, and the `<< 24` energy/UnitPara bit shifts in c3 `message.py`.
+4. Keep the wrapper-file changes (not vendored): `midea_devices.py` entity entries, `MideaC3EcoSwitch` heat-only guard in `switch.py`, the platform-domain `entity_id` fix and `async_will_remove_from_hass` in `midea_entity.py`, the `async_unload_entry` ordering and the double-auth/executor config-flow fixes, `__init__.py` sys.path, and `manifest.json` requirements (including `pycryptodome`/`ifaddr`/`Deprecated`).
 5. Bump version in `manifest.json`, create a new release tag, HACS will offer the update.
 
 Ideally, the `status_cool` gap is worth a PR upstream (the lib parses it but never exposes it), which would remove the need to patch the vendored copy.

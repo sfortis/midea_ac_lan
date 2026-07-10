@@ -21,6 +21,7 @@ job process:
 """
 
 import logging
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -53,9 +54,8 @@ from midealocal.cloud import (
     MideaCloud,
     get_midea_cloud,
 )
-from midealocal.device import AuthException, MideaDevice, ProtocolVersion
+from midealocal.device import MideaDevice, ProtocolVersion
 from midealocal.discover import discover
-from midealocal.exceptions import SocketException
 
 if TYPE_CHECKING:
     from aiohttp import ClientSession
@@ -352,7 +352,7 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
 
         """
         # get all devices list
-        all_devices = discover()
+        all_devices = await self.hass.async_add_executor_job(discover)
         # available devices exist
         if len(all_devices) > 0:
             table = (
@@ -399,7 +399,9 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
             else:
                 ip_address = discovery_info[CONF_IP_ADDRESS]
             # use midea-local discover() to get devices list with ip_address
-            self.devices = discover(list(self.supports.keys()), ip_address=ip_address)
+            self.devices = await self.hass.async_add_executor_job(
+                partial(discover, list(self.supports.keys()), ip_address=ip_address),
+            )
             self.available_device = {}
             for device_id, device in self.devices.items():
                 # remove exist devices and only return new devices
@@ -508,17 +510,13 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                 subtype=0,
                 attributes={},
             )
-            if dm.connect():
-                try:
-                    dm.authenticate()
-                except AuthException:
-                    _LOGGER.debug("Unable to authenticate.")
-                    dm.close_socket()
-                except SocketException:
-                    _LOGGER.debug("Socket closed.")
-                else:
-                    dm.close_socket()
-                    return value
+            # [fork] connect() already performs the V3 authentication handshake
+            # (midealocal/device.py); a second authenticate() on the same
+            # session can reject an otherwise-valid token. Run the blocking
+            # socket work in the executor so the event loop is not blocked.
+            if await self.hass.async_add_executor_job(dm.connect):
+                dm.close_socket()
+                return value
             # return debug log with failed key
             _LOGGER.debug(
                 "connect device using method %s token/key failed",
@@ -693,9 +691,8 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
             if len(self.devices) < 1:
                 ip = user_input[CONF_IP_ADDRESS]
                 # discover device
-                self.devices = discover(
-                    list(self.supports.keys()),
-                    ip_address=ip,
+                self.devices = await self.hass.async_add_executor_job(
+                    partial(discover, list(self.supports.keys()), ip_address=ip),
                 )
                 # discover result MUST exist
                 if len(self.devices) != 1:
@@ -774,38 +771,31 @@ class MideaLanConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                 subtype=0,
                 attributes={},
             )
-            if dm.connect():
-                try:
-                    if user_input[CONF_PROTOCOL] == ProtocolVersion.V3:
-                        dm.authenticate()
-                except SocketException:
-                    _LOGGER.exception("Socket closed.")
-                except AuthException:
-                    _LOGGER.exception(
-                        "Unable to authenticate with provided key and token.",
-                    )
-                    dm.close_socket()
-                else:
-                    dm.close_socket()
-                    data = {
-                        CONF_NAME: user_input[CONF_NAME],
-                        CONF_DEVICE_ID: user_input[CONF_DEVICE_ID],
-                        CONF_TYPE: user_input[CONF_TYPE],
-                        CONF_PROTOCOL: user_input[CONF_PROTOCOL],
-                        CONF_IP_ADDRESS: user_input[CONF_IP_ADDRESS],
-                        CONF_PORT: user_input[CONF_PORT],
-                        CONF_MODEL: user_input[CONF_MODEL],
-                        CONF_SUBTYPE: user_input[CONF_SUBTYPE],
-                        CONF_TOKEN: user_input[CONF_TOKEN],
-                        CONF_KEY: user_input[CONF_KEY],
-                    }
-                    # save device json config when adding new device
-                    self._save_device_config(data)
-                    # finish add device entry
-                    return self.async_create_entry(
-                        title=f"{user_input[CONF_NAME]}",
-                        data=data,
-                    )
+            # [fork] connect() already authenticates V3 sessions and returns
+            # False on auth/socket failure, so the previous second
+            # authenticate() call was redundant and could reject a valid token.
+            # Run the blocking connect in the executor.
+            if await self.hass.async_add_executor_job(dm.connect):
+                dm.close_socket()
+                data = {
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_DEVICE_ID: user_input[CONF_DEVICE_ID],
+                    CONF_TYPE: user_input[CONF_TYPE],
+                    CONF_PROTOCOL: user_input[CONF_PROTOCOL],
+                    CONF_IP_ADDRESS: user_input[CONF_IP_ADDRESS],
+                    CONF_PORT: user_input[CONF_PORT],
+                    CONF_MODEL: user_input[CONF_MODEL],
+                    CONF_SUBTYPE: user_input[CONF_SUBTYPE],
+                    CONF_TOKEN: user_input[CONF_TOKEN],
+                    CONF_KEY: user_input[CONF_KEY],
+                }
+                # save device json config when adding new device
+                self._save_device_config(data)
+                # finish add device entry
+                return self.async_create_entry(
+                    title=f"{user_input[CONF_NAME]}",
+                    data=data,
+                )
             return await self.async_step_manually(
                 error="Device auth failed with input config",
             )
